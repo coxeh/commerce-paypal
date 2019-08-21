@@ -28,7 +28,8 @@
     "craftcms/cms": "^3.1.5",
     "craftcms/commerce": "^2.0|^3.0",
     "craftcms/commerce-omnipay": "^2.0.0",
-    "omnipay/paypal": "^3.0.2"
+    "omnipay/paypal": "^3.0.2",
+    "paypal/rest-api-sdk-php": "dev-master"
   },
   "autoload": {
     "psr-4": {
@@ -38,5 +39,11 @@
   "extra": {
     "name": "PayPal for Craft Commerce",
     "handle": "commerce-paypal"
-  }
+  },
+  "repositories": [
+    {
+      "type": "path",
+      "url": "../PayPal-PHP-SDK"
+    }
+  ]
 }

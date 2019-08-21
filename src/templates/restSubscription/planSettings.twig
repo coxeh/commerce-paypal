@@ -1,0 +1,107 @@
+{% from "_includes/forms" import textField, lightswitchField, selectField, autosuggestField, textAreaField %}
+
+<input name="reference" type="hidden" value="{{ plan is not null ? plan.reference : ''}}">
+{{ textAreaField({
+    label: "Plan Description"|t('commerce'),
+    name: 'description',
+    value: plan.getPlanData.description ?? '',
+    instructions:'The detailed description of the plan.',
+    maxlength:127,
+    errors: plan is not null ? plan.getErrors('planData.description') : null,
+}) }}
+
+{{ lightswitchField({
+    label: "Has Trial"|t('commerce'),
+    name: 'hasTrial',
+    value:'yes',
+    on: plan.getPlanData.hasTrial ?? false,
+    errors: plan is not null ? plan.getErrors('planData.hasTrial') : null,
+}) }}
+
+{{ textField({
+    label: "Trial Period"|t('commerce'),
+    name: 'trialPeriod',
+    value: plan.getPlanData.trialPeriod ?? 0,
+    errors: plan is not null ? plan.getErrors('planData.trialPeriod') : null,
+}) }}
+
+{{ textField({
+    label: "Trial Total Cycles"|t('commerce'),
+    name: 'trialCycles',
+    value: plan.getPlanData.trialCycles ?? 1,
+    errors: plan is not null ? plan.getErrors('planData.trialCycles') : null,
+}) }}
+
+{{ selectField({
+    label: "Trial Frequency"|t('commerce'),
+    name: 'trialFrequency',
+    value: plan.getPlanData.trialFrequency  ?? 'MONTH',
+    options: frequencies,
+    errors: plan is not null ? plan.getErrors('planData.trialFrequency') : null,
+}) }}
+
+{{ textField({
+    label: "Trial Price"|t('commerce'),
+    name: 'trialPrice',
+    value: plan.getPlanData.trialPrice  ?? '0',
+    errors: plan is not null ? plan.getErrors('planData.trialPrice') : null,
+}) }}
+
+
+{{ textField({
+    label: "Subscription Period"|t('commerce'),
+    name: 'subscriptionPeriod',
+    value: plan.getPlanData.subscriptionPeriod  ?? 1,
+    errors: plan is not null ? plan.getErrors('planData.subscriptionPeriod') : null,
+}) }}
+
+{{ selectField({
+    label: "Subscription Frequency"|t('commerce'),
+    name: 'subscriptionFrequency',
+    value: plan.getPlanData.subscriptionFrequency  ?? 'MONTH',
+    options: frequencies,
+    errors: plan is not null ? plan.getErrors('planData.subscriptionFrequency'),
+}) }}
+
+{{ textField({
+    label: "Subscription Total Cycles"|t('commerce'),
+    name: 'subscriptionCycles',
+    value: plan.getPlanData.subscriptionCycles ?? 0,
+    errors: plan is not null ? plan.getErrors('planData.subscriptionCycles') : null,
+    instructions:'Enter 0 for the subscription to not end'
+}) }}
+
+{{ textField({
+    label: "Subscription Price"|t('commerce'),
+    name: 'subscriptionPrice',
+    value: plan.getPlanData.trialPrice  ?? '0',
+    errors: plan is not null ? plan.getErrors('planData.trialPrice'),
+}) }}
+
+{{ lightswitchField({
+    label: "Has Setup Fee"|t('commerce'),
+    name: 'hasSetupFee',
+    value:'yes',
+    on: plan.getPlanData.hasSetupFee ?? false,
+    errors: plan is not null ? plan.getErrors('planData.hasSetupFee') : null,
+}) }}
+
+{{ textField({
+    label: "Setup Fee Price"|t('commerce'),
+    name: 'setupFee',
+    value: plan.getPlanData.setupFee  ?? '0',
+    errors: plan is not null ? plan.getErrors('planData.setupFee'),
+}) }}
+{{ selectField({
+    label: "Setup Fee Failure Action"|t('commerce'),
+    name: 'setupFeeFailureAction',
+    value: plan.getPlanData.setupFeeFailureAction  ?? 'CANCEL',
+    options: setupFeeFailureTypes,
+    errors: plan is not null ? plan.getErrors('planData.setupFeeFailureAction'),
+}) }}
+{{ textField({
+    label: "Payment Failure Threshold"|t('commerce'),
+    name: 'paymentFailureThreshold',
+    value: plan.getPlanData.paymentFailureThreshold  ?? '1',
+    errors: plan is not null ? plan.getErrors('planData.paymentFailureThreshold'),
+}) }}

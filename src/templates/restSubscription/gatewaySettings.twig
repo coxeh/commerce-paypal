@@ -1,0 +1,54 @@
+{% from "_includes/forms" import textField, lightswitchField, selectField, autosuggestField, textAreaField %}
+
+
+<input name="productId" type="hidden" value="{{ gateway.productId|hash }}">
+
+{{ autosuggestField({
+    label: 'Client ID'|t('commerce'),
+    id: 'clientId',
+    class: 'ltr',
+    name: 'clientId',
+    suggestEnvVars: true,
+    value: gateway.clientId,
+    errors: gateway.getErrors('clientId')
+}) }}
+
+{{ autosuggestField({
+    label: "Secret"|t('commerce'),
+    id: 'secret',
+    class: 'ltr',
+    name: 'secret',
+    suggestEnvVars: true,
+    value: gateway.secret,
+    errors: gateway.getErrors('secret')
+}) }}
+
+{{ lightswitchField({
+    label: "Test mode?"|t('commerce'),
+    name: 'testMode',
+    on: gateway.testMode,
+    errors: gateway.getErrors('testMode'),
+}) }}
+
+{{ selectField({
+    label: "Product Type"|t('commerce'),
+    name: 'type',
+    options: types,
+    value: gateway.type,
+    errors: gateway.getErrors('type'),
+}) }}
+
+{{ selectField({
+    label: "Product Category"|t('commerce'),
+    name: 'category',
+    options: categories,
+    value: gateway.category,
+    errors: gateway.getErrors('category'),
+}) }}
+
+{{ textAreaField({
+    label: "Product Description"|t('commerce'),
+    name: 'description',
+    value: gateway.description,
+    errors: gateway.getErrors('description'),
+}) }}
