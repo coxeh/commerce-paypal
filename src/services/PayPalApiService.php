@@ -4,8 +4,12 @@ namespace craft\commerce\paypal\services;
 use craft\base\Component;
 use craft\commerce\paypal\contracts\PaypalBillingPlan;
 use craft\commerce\paypal\models\PayPalProduct;
+use craft\commerce\paypal\models\PayPalSubscription;
 use craft\commerce\paypal\models\PaypalSubscriptionRequestResponse;
+use craft\commerce\paypal\models\PayPalWebhook;
 use craft\commerce\paypal\Plugin;
+use craft\helpers\UrlHelper;
+use craft\web\Request;
 use PayPal\Api\ApplicationContext;
 use PayPal\Api\BillingCycle;
 use PayPal\Api\Frequency;
@@ -17,6 +21,9 @@ use PayPal\Api\Plan;
 use PayPal\Api\PricingScheme;
 use PayPal\Api\Subscription;
 use PayPal\Api\SubscriptionPlan;
+use PayPal\Api\VerifyWebhookSignature;
+use PayPal\Api\Webhook;
+use PayPal\Api\WebhookEventType;
 use PayPal\Auth\OAuthTokenCredential;
 use PayPal\Exception\PayPalConnectionException;
 use PayPal\Rest\ApiContext;
@@ -27,6 +34,17 @@ class PayPalApiService extends Component{
     public $secret;
     public $testMode;
     protected $context;
+    protected $subscriptionWebhookEvents = [
+        'BILLING.SUBSCRIPTION.ACTIVATED',
+        'BILLING.SUBSCRIPTION.CANCELLED',
+        'BILLING.SUBSCRIPTION.CREATED',
+        'BILLING.SUBSCRIPTION.EXPIRED',
+        'BILLING.SUBSCRIPTION.RE-ACTIVATED',
+        'BILLING.SUBSCRIPTION.RENEWED',
+        'BILLING.SUBSCRIPTION.SUSPENDED',
+        'BILLING.SUBSCRIPTION.UPDATED',
+        'PAYMENT.SALE.COMPLETED'
+    ];
 
     public function init()
     {
@@ -38,9 +56,99 @@ class PayPalApiService extends Component{
                     $this->secret
                 )
             );
+            if($this->testMode === false) {
+                $config = $this->context->getConfig();
+                $config['mode'] = 'live';
+                $this->context->setConfig($config);
+            }
         }
     }
 
+    public function verifyWebhookRequest($webhookId, Request $request){
+        $validator = new VerifyWebhookSignature();
+        $validator->setWebhookId($webhookId);
+        $validator->setAuthAlgo($request->headers->get('paypal-auth-algo'));
+        $validator->setTransmissionId($request->headers->get('paypal-transmission-id'));
+        $validator->setCertUrl($request->headers->get('paypal-cert-url'));
+        $validator->setTransmissionSig($request->headers->get('paypal-transmission-sig'));
+        $validator->setTransmissionTime($request->headers->get('paypal-transmission-time'));
+        $validator->setRequestBody($request->getRawBody());
+        try{
+            $output = $validator->post($this->context);
+            return $output->getVerificationStatus()==='SUCCESS';
+        }catch (\Exception $e){
+            \Craft::info($e->getMessage(),Plugin::LogCategory);
+            \Craft::info($e->getTraceAsString(),Plugin::LogCategory);
+        }
+        return false;
+    }
+
+    public function updateSubscriptionWebhookUrl(PayPalWebhook $paypalWebhook){
+        if($paypalWebhook->isDirty() && $paypalWebhook->validate()){
+            $patchRequest = new PatchRequest();
+            if($paypalWebhook->isDirty('url')){
+                $patch = new Patch();
+                $patch->setValue($paypalWebhook->url)->setOp('replace')->setPath('/url');
+                $patchRequest->addPatch($patch);
+            }
+            if(count($patchRequest->getPatches()) > 0){
+                try {
+                    $payPalProduct = Product::get($paypalWebhook->id, $this->context);
+                    $payPalProduct->update($patchRequest, $this->context);
+
+                    return $paypalWebhook->syncDirtyData();
+                }catch (PayPalConnectionException $e){
+                    \Craft::info($e->getData(),Plugin::LogCategory);
+                    $paypalWebhook->addError('api',$e->getMessage());
+                }
+            }
+        }
+        return $paypalWebhook;
+    }
+    public function getSubscriptionWebhookById($id){
+        $webhook = Webhook::get($id, $this->context);
+        return new PayPalWebhook([
+            'id'=>$webhook->getId(),
+            'url'=> $webhook->getUrl()
+        ]);
+    }
+    /**
+     * @param PayPalWebhook $paypalWebhook
+     * @return PayPalWebhook
+     */
+    public function createSubscriptionWebHook(PayPalWebhook $paypalWebhook) {
+        try{
+            if($paypalWebhook->validate()){
+                $eventTypes = array_map(function($eventName){
+                    $event = new WebhookEventType();
+                    $event->setName($eventName);
+                    return $event;
+                }, $this->subscriptionWebhookEvents);
+                $webhook = new Webhook();
+                $webhook->setUrl($paypalWebhook->url);
+                $webhook->setEventTypes($eventTypes);
+                $webhook->create($this->context);
+                $paypalWebhook->id = $webhook->getId();
+            }
+        }catch (PayPalConnectionException $e){
+            \Craft::info($e->getData(),Plugin::LogCategory);
+            $paypalWebhook->addError($e->getMessage());
+        }
+        return $paypalWebhook;
+    }
+
+    /**
+     * @param $subscriptionId
+     * @return PaypalSubscriptionRequestResponse
+     */
+    public function getSubscription($subscriptionId){
+        $subscription = Subscription::get($subscriptionId, $this->context);
+        return new PaypalSubscriptionRequestResponse([
+            'id'=>$subscription->getId(),
+            'status'=>$subscription->getStatus(),
+            //'nextBillingTime'=>$subscription->getBillingInfo()->get
+        ]);
+    }
     /**
      * @param PaypalBillingPlan $paypalBillingPlan
      * @return PaypalSubscriptionRequestResponse|null
@@ -50,9 +158,12 @@ class PayPalApiService extends Component{
         $subscription->setPlanId($paypalBillingPlan->getPlanId());
         $subscription->setAutoRenewal($paypalBillingPlan->getAutoRenewPlan());
 
+        $successUrl = UrlHelper::actionUrl('commerce-paypal/subscription/success');
+        $cancelUrl = UrlHelper::actionUrl('commerce-paypal/subscription/cancel');
+
         $applicationContext = new ApplicationContext();
-        $applicationContext->setCancelUrl('https://example.com/cancelUrl');
-        $applicationContext->setReturnUrl('https://example.com/returnUrl');
+        $applicationContext->setCancelUrl($cancelUrl);
+        $applicationContext->setReturnUrl($successUrl);
 
         $subscription->setApplicationContext($applicationContext);
 
@@ -62,7 +173,7 @@ class PayPalApiService extends Component{
                 if($link->getRel() === 'approve') {
                     return new PaypalSubscriptionRequestResponse([
                         'redirectLink'=>$link->getHref(),
-                        'paypalSubscriptionId'=>$subscription->getId(),
+                        'id'=>$subscription->getId(),
                         'status'=>$subscription->getStatus()
                     ]);
                 }

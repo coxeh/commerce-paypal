@@ -4,8 +4,10 @@ namespace craft\commerce\paypal\behaviours;
 use craft\commerce\paypal\contracts\PaypalRestApiGateway;
 use craft\commerce\paypal\gateways\PayPalRestSubscription;
 use craft\commerce\paypal\models\PayPalProduct;
+use craft\commerce\paypal\models\PayPalWebhook;
 use craft\commerce\paypal\services\PayPalApiService;
 use craft\commerce\paypal\services\PayPalApiServiceFactory;
+use PayPal\Exception\PayPalConnectionException;
 use yii\base\Behavior;
 use yii\base\ModelEvent;
 
@@ -15,7 +17,7 @@ class PayPalGatewaySubscriptionBehaviour extends Behavior
     public function events()
     {
         return [
-            PayPalRestSubscription::EVENT_BEFORE_VALIDATE => 'syncProduct',
+            PayPalRestSubscription::EVENT_BEFORE_VALIDATE => 'syncWithPaypal',
         ];
     }
 
@@ -25,15 +27,15 @@ class PayPalGatewaySubscriptionBehaviour extends Behavior
      * @throws \yii\base\Exception
      * @throws \yii\base\InvalidConfigException
      */
-    public function syncProduct(ModelEvent $event){
+    public function syncWithPaypal(ModelEvent $event){
         if($event->sender->isArchived === false){
-            if(!empty($event->sender->productId)){
-                $event->sender->productId = \Craft::$app->security->validateData($event->sender->productId);
-                if($event->sender->productId === '') {
-                    $event->sender->productId = null;
-                }
-            }
+
+            $this->handleSecureGatewayParam($event->sender,'productId');
+            $this->handleSecureGatewayParam($event->sender,'testWebhookId');
+            $this->handleSecureGatewayParam($event->sender,'webhookId');
+
             $apiService = PayPalApiServiceFactory::CreateForGateway($event->sender);
+            $this->syncPayPalWebhooks($apiService, $event->sender);
             $product = $this->syncPayPalProduct($apiService, $event->sender);
             if(!is_null($product) && count($product->errors)>0){
                 $event->sender->addErrors($product->errors);
@@ -45,17 +47,49 @@ class PayPalGatewaySubscriptionBehaviour extends Behavior
     /**
      * @param PayPalApiService $apiService
      * @param PaypalRestApiGateway $gateway
+     * @return PayPalWebhook
+     * @throws PayPalConnectionException
+     */
+    protected function syncPayPalWebhooks(PayPalApiService $apiService, PaypalRestApiGateway $gateway){
+        $webhookId = $gateway->getIsTestMode() ? $gateway->getTestWebhookId() : $gateway->getWebhookId();
+        $newWebhook = new PayPalWebhook([ 'url' => $gateway->getWebhookUrl() ]);
+        if(empty($webhookId)){
+            $webhook = $apiService->createSubscriptionWebHook($newWebhook);
+        } else {
+            try{
+                $webhook = $apiService->getSubscriptionWebhookById($webhookId);
+                $webhook->url = $gateway->getWebhookUrl();
+                $webhook = $apiService->updateSubscriptionWebhookUrl($webhook);
+            }catch (PayPalConnectionException $e){
+                if($e->getCode() == 404) {
+                    $webhook = $apiService->createSubscriptionWebHook($newWebhook);
+                }else{
+                    throw $e;
+                }
+            }
+        }
+        if($gateway->getIsTestMode()){
+            $gateway->setTestWebhookId($webhook->id);
+        }else{
+            $gateway->setWebhookId($webhook->id);
+        }
+        return $webhook;
+    }
+
+    /**
+     * @param PayPalApiService $apiService
+     * @param PaypalRestApiGateway $gateway
      * @return PayPalProduct|null
      */
     protected function syncPayPalProduct(PayPalApiService $apiService, PaypalRestApiGateway $gateway){
         if (is_null($gateway->getProductId())) {
             $product = $this->createProduct($apiService,$gateway);
-            $gateway->productId = $product->id;
+            $gateway->setProductId($product->id);
         } else {
             $product = $apiService->getProductById($gateway->getProductId());
             if (is_null($product)) {
                 $product = $this->createProduct($apiService,$gateway);
-                $gateway->productId = $product->id;
+                $gateway->setProductId($product->id);
             } else {
                 $product = $this->updateProduct($apiService,$gateway,$product);
             }
@@ -89,5 +123,15 @@ class PayPalGatewaySubscriptionBehaviour extends Behavior
         $product->type = $gateway->getType();
         $product->category = $gateway->getCategory();
         return $apiService->updateProduct($product);
+    }
+
+    protected function handleSecureGatewayParam($gateway, $key){
+        if(!empty($gateway->$key)){
+            $gateway->$key = \Craft::$app->security->validateData($gateway->$key);
+            if($gateway->$key === '') {
+                $gateway->$key = null;
+            }
+        }
+        return $gateway;
     }
 }

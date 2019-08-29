@@ -48,7 +48,7 @@ class PayPalRest extends CreditCardGateway
      */
     public static function displayName(): string
     {
-        return Craft::t('commerce', 'PayPal REST gateway');
+        return Craft::t('commerce', 'PayPal REST gateway (without subscriptions)');
     }
 
     /**

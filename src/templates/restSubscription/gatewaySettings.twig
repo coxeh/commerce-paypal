@@ -2,6 +2,8 @@
 
 
 <input name="productId" type="hidden" value="{{ gateway.productId|hash }}">
+<input name="testWebhookId" type="hidden" value="{{ gateway.testWebhookId|hash }}">
+<input name="webhookId" type="hidden" value="{{ gateway.webhookId|hash }}">
 
 {{ autosuggestField({
     label: 'Client ID'|t('commerce'),

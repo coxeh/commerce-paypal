@@ -2,32 +2,34 @@
 
 namespace craft\commerce\paypal\controllers;
 
-use craft\commerce\paypal\models\PayPalProduct;
+use craft\commerce\paypal\Plugin as PayPalPlugin;
+use craft\commerce\paypal\services\PaypalSubscriptionService;
 use craft\web\Controller as BaseController;
-use yii\web\NotFoundHttpException;
 
 
 class SubscriptionController extends BaseController
 {
+    protected $allowAnonymous = true;
+    public function actionSuccess(){
+        $request = \Craft::$app->request;
+        $subscriptionService = $this->getSubscriptionService();
 
-    public function actionPlans($gatewayId){
+        $subscriptionId = $request->getQueryParam('subscription_id');
+        $subscription = $subscriptionService->getSubscriptionRequestByPayPalSubscriptionId($subscriptionId);
+        $subscriptionService->updateSubscriptionStatus($subscription);
 
-        $product = new PayPalProduct();
-        $product->name = 'Blah';
-        $product->type = 'DIGITAL';
-        $product->validate();
-
-        /*$apiService = $this->getGatewayByIdOrFail($gatewayId)->getApiService();
-        $this->asJson($apiService->getProducts());*/
     }
 
+    public function actionCancel(){
+        $request = \Craft::$app->request;
+        $subscriptionId = $request->getBodyParam('subscription_id');
+        dd($subscriptionId);
+    }
 
-
-    protected function getGatewayByIdOrFail($gatewayId){
-        $gateway =  \Craft::$app->getModule('commerce')->get('gateways')->getGatewayById($gatewayId);
-        if(is_null($gateway)){
-            throw new NotFoundHttpException('Gateway Not Found');
-        }
-        return $gateway;
+    /**
+     * @return PaypalSubscriptionService
+     */
+    protected function getSubscriptionService(){
+        return PayPalPlugin::getInstance()->subscriptions;
     }
 }

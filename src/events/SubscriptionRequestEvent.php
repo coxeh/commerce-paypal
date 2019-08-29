@@ -1,7 +1,7 @@
 <?php
 namespace craft\commerce\paypal\events;
 
-use craft\commerce\paypal\models\SubscriptionRequest;
+use craft\commerce\paypal\models\PayPalSubscription;
 use yii\base\Event;
 
 /**
@@ -11,7 +11,7 @@ use yii\base\Event;
 class SubscriptionRequestEvent extends Event
 {
     /**
-     * @var SubscriptionRequest SubscriptionRequest
+     * @var PayPalSubscription SubscriptionRequest
      */
     public $subscriptionRequest;
     /**

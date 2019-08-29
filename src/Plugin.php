@@ -11,6 +11,7 @@ use craft\commerce\paypal\gateways\PayPalPro;
 use craft\commerce\paypal\gateways\PayPalRestSubscription;
 use craft\commerce\paypal\models\PayPalBillingPlan;
 use craft\commerce\paypal\models\PayPalProduct;
+use craft\commerce\paypal\models\PayPalWebhook;
 use craft\commerce\paypal\services\PaypalSubscriptionService;
 use craft\commerce\services\Gateways;
 use craft\events\DefineBehaviorsEvent;
@@ -55,13 +56,6 @@ class Plugin extends \craft\base\Plugin
             PayPalRestSubscription::EVENT_DEFINE_BEHAVIORS,
             function(DefineBehaviorsEvent $event){
                 $event->behaviors[] = PayPalGatewaySubscriptionBehaviour::class;
-            }
-        );
-        Event::on(
-            PayPalProduct::class,
-            PayPalProduct::EVENT_DEFINE_BEHAVIORS,
-            function(DefineBehaviorsEvent $event){
-                $event->behaviors[] = DetectsChangesBehaviour::class;
             }
         );
 

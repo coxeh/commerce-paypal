@@ -8,4 +8,6 @@ class PaypalSubscriptionRequestResponse extends Model {
     public $redirectLink;
     public $id;
     public $status;
+    public $nextBillingTime;
+    public $startTime;
 }

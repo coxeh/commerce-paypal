@@ -4,8 +4,9 @@ namespace craft\commerce\paypal\services;
 use Craft;
 use craft\base\Component;
 use craft\commerce\paypal\events\SubscriptionRequestEvent;
-use craft\commerce\paypal\models\SubscriptionRequest;
+use craft\commerce\paypal\models\PayPalSubscription;
 use craft\commerce\paypal\records\SubscriptionRequest as SubscriptionRecord;
+use craft\commerce\Plugin as CommercePlugin;
 use yii\base\InvalidConfigException;
 
 class PaypalSubscriptionService extends Component{
@@ -15,7 +16,43 @@ class PaypalSubscriptionService extends Component{
     const EVENT_AFTER_VALIDATE_SUBSCRIPTION_REQUEST= 'afterValidateSubscriptionRequest';
 
 
-    public function saveSubscriptionRequest(SubscriptionRequest $request, $runValidation = true){
+    public function updateSubscriptionStatus(PayPalSubscription $payPalSubscription){
+        $apiService = PayPalApiServiceFactory::CreateForGateway($payPalSubscription->plan->gateway);
+        $subscriptionApiResponse = $apiService->getSubscription($payPalSubscription->paypalSubscriptionId);
+        if($payPalSubscription->status !== $subscriptionApiResponse->status){
+            switch($subscriptionApiResponse->status){
+                case 'ACTIVE':
+                    $payPalSubscription->setResponse( $subscriptionApiResponse);
+
+                    $subscriptionForm = $payPalSubscription->plan->gateway
+                        ->getSubscriptionFormModel()
+                        ->disableRedirect()
+                        ->setPayPalSubscription($payPalSubscription);
+
+                    $subscription = CommercePlugin::getInstance()
+                        ->subscriptions
+                        ->createSubscription($payPalSubscription->user,$payPalSubscription->plan,$subscriptionForm);
+
+                    $payPalSubscription->subscriptionId = $subscription->id;
+
+                    $this->saveSubscriptionRequest($payPalSubscription);
+
+                    break;
+            }
+        }
+    }
+
+    public function getSubscriptionRequestByPayPalSubscriptionId($subscriptionId){
+        $subscription = SubscriptionRecord::find()->where(['paypalSubscriptionId'=>$subscriptionId])->one();
+        if(!is_null($subscription)){
+            $payPalSubscription = new PayPalSubscription();
+            $payPalSubscription->setAttributes($subscription->toArray(),false);
+            return $payPalSubscription;
+        }
+        return null;
+    }
+
+    public function saveSubscriptionRequest(PayPalSubscription $request, $runValidation = true){
         if ($request->id) {
             $record = SubscriptionRecord::findOne($request->id);
             if (!$record) {
