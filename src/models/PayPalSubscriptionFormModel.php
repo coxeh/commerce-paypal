@@ -4,7 +4,7 @@ namespace craft\commerce\paypal\models;
 
 use craft\commerce\models\subscriptions\SubscriptionForm;
 
-class PaypalSubscriptionFormModel extends SubscriptionForm
+class PayPalSubscriptionFormModel extends SubscriptionForm
 {
     private $performRedirect = true;
     public $successUrl;

@@ -10,7 +10,7 @@ use craft\web\Controller as BaseController;
 class SubscriptionController extends BaseController
 {
     protected $allowAnonymous = true;
-    public function actionSuccess(){
+    public function actionComplete(){
         $request = \Craft::$app->request;
         $subscriptionService = $this->getSubscriptionService();
 

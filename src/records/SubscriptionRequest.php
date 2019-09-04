@@ -12,6 +12,7 @@ use craft\db\ActiveRecord;
  * @property integer gatewayId
  * @property integer subscriptionId
  * @property string paypalSubscriptionId
+ * @property string nextBillingTime
  * @property string status
  * @property string redirectLink
  * @property string dateCreated

@@ -4,7 +4,9 @@ namespace craft\commerce\paypal\models;
 
 use craft\base\Model;
 use craft\commerce\base\SubscriptionResponseInterface;
+use craft\commerce\paypal\models\enum\PayPalSubscriptionStatus;
 use craft\commerce\Plugin as CommercePlugin;
+use craft\helpers\DateTimeHelper;
 use DateTime;
 
 /**
@@ -30,6 +32,7 @@ class PayPalSubscription extends Model implements SubscriptionResponseInterface 
     public $paypalSubscriptionId;
     public $status;
     public $redirectLink;
+    public $nextBillingTime;
     public $id;
     protected $_gateway;
     protected $_plan;
@@ -43,15 +46,25 @@ class PayPalSubscription extends Model implements SubscriptionResponseInterface 
         return $rules;
     }
 
+    public function setAsCancelled(){
+        $this->status = PayPalSubscriptionStatus::CANCELLED;
+        return $this;
+    }
+    public function setAsActive(){
+        $this->status = PayPalSubscriptionStatus::ACTIVE;
+        return $this;
+    }
+
     public function handleRedirect(){
         header('Location: '.$this->redirectLink);
         exit();
     }
 
-    public function setResponse(PaypalSubscriptionRequestResponse $response){
+    public function setResponse(PayPalSubscriptionRequestResponse $response){
         $this->paypalSubscriptionId = $response->id;
         $this->status = $response->status;
         $this->redirectLink = $response->redirectLink;
+        $this->nextBillingTime = $response->nextBillingTime;
         return $this;
     }
 
@@ -128,8 +141,11 @@ class PayPalSubscription extends Model implements SubscriptionResponseInterface 
      */
     public function getNextPaymentDate(): DateTime
     {
-        //Todo update Paypal response api. get from that
-        return new DateTime();
+        if ($this->nextBillingTime && !$this->nextBillingTime instanceof \DateTime) {
+            // Just automatically convert it rather than complaining about it
+            $this->nextBillingTime = DateTimeHelper::toDateTime($this->nextBillingTime);
+        }
+        return $this->nextBillingTime;
     }
 
     /**
@@ -139,7 +155,7 @@ class PayPalSubscription extends Model implements SubscriptionResponseInterface 
      */
     public function isCanceled(): bool
     {
-        return $this->status !== 'ACTIVE';
+        return $this->status === PayPalSubscriptionStatus::CANCELLED;
     }
 
     /**
@@ -149,7 +165,7 @@ class PayPalSubscription extends Model implements SubscriptionResponseInterface 
      */
     public function isScheduledForCancellation(): bool
     {
-        return $this->status !== 'ACTIVE';
+        return $this->status !== PayPalSubscriptionStatus::ACTIVE;
     }
 
     /**
@@ -159,6 +175,6 @@ class PayPalSubscription extends Model implements SubscriptionResponseInterface 
      */
     public function isInactive(): bool
     {
-        return $this->status !== 'ACTIVE';
+        return $this->status !== PayPalSubscriptionStatus::ACTIVE;
     }
 }

@@ -14,10 +14,13 @@ use craft\commerce\paypal\models\enum\FrequencyType;
 use craft\commerce\paypal\models\enum\SetupFeeFailureType;
 use craft\commerce\paypal\models\PayPalBillingPlan;
 use craft\commerce\paypal\models\PayPalSubscription;
-use craft\commerce\paypal\models\PaypalSubscriptionFormModel;
+use craft\commerce\paypal\models\PayPalSubscriptionCancelFormModel;
+use craft\commerce\paypal\models\PayPalSubscriptionFormModel;
+use craft\commerce\paypal\models\PayPalSubscriptionSwitchFormModel;
 use craft\commerce\paypal\PayPalSubscriptionBundle;
 use craft\commerce\paypal\Plugin;
 use craft\commerce\paypal\services\PayPalApiServiceFactory;
+use craft\commerce\paypal\services\PaypalSubscriptionService;
 use craft\elements\User;
 use craft\web\Response as WebResponse;
 use craft\web\View;
@@ -45,6 +48,7 @@ trait HandlesRestSubscriptions{
                     //Handle Cancellaations
 
                 case 'PAYMENT.SALE.COMPLETED':
+                    // $subscriptionRequest = $this->getPayPalSubscriptionService()->getSubscriptionRequestByPayPalSubscriptionId()
                     //Handle Payments
 
             }
@@ -73,7 +77,7 @@ trait HandlesRestSubscriptions{
      */
     public function getCancelSubscriptionFormHtml(Subscription $subscription): string
     {
-        // TODO: Implement getCancelSubscriptionFormHtml() method.
+        return '';
     }
 
     /**
@@ -83,7 +87,7 @@ trait HandlesRestSubscriptions{
      */
     public function getCancelSubscriptionFormModel(): CancelSubscriptionForm
     {
-        // TODO: Implement getCancelSubscriptionFormModel() method.
+        return new PayPalSubscriptionCancelFormModel();
     }
 
     /**
@@ -128,7 +132,7 @@ trait HandlesRestSubscriptions{
      */
     public function getSubscriptionFormModel(): SubscriptionForm
     {
-        return new PaypalSubscriptionFormModel();
+        return new PayPalSubscriptionFormModel();
     }
 
     /**
@@ -138,7 +142,7 @@ trait HandlesRestSubscriptions{
      */
     public function getSwitchPlansFormModel(): SwitchPlansForm
     {
-        // TODO: Implement getSwitchPlansFormModel() method.
+        return new PayPalSubscriptionSwitchFormModel();
     }
 
     /**
@@ -151,7 +155,24 @@ trait HandlesRestSubscriptions{
      */
     public function cancelSubscription(Subscription $subscription, CancelSubscriptionForm $parameters): SubscriptionResponseInterface
     {
-        // TODO: Implement cancelSubscription() method.
+        $subscriptionRequest = $this->getSubscriptionRequestFromSubscription($subscription);
+        $apiService = PayPalApiServiceFactory::CreateForGateway($subscriptionRequest->getPlan()->getGateway());
+        $hasCancelled = $apiService->cancelSubscription($subscriptionRequest->paypalSubscriptionId, 'User Cancelled');
+        if($hasCancelled === false){
+            throw new SubscriptionException('Subscription Could not be cancelled. Paypal Returned an error');
+        }
+
+        try{
+            $subscriptionService = $this->getPayPalSubscriptionService();
+            $subscriptionRequest->setAsCancelled();
+            $subscriptionRequest = $subscriptionService->saveSubscriptionRequest($subscriptionRequest);
+        }catch (\Exception $e){
+            \Craft::info($e->getMessage(),Plugin::LogCategory);
+            \Craft::info($e->getTraceAsString(),Plugin::LogCategory);
+            throw new SubscriptionException('Could not update Subscription');
+        }
+
+        return $subscriptionRequest;
     }
 
     /**
@@ -162,7 +183,7 @@ trait HandlesRestSubscriptions{
      */
     public function getNextPaymentAmount(Subscription $subscription): string
     {
-        // TODO: Implement getNextPaymentAmount() method.
+        return $subscription->plan->getPlanData()['subscriptionPrice'];
     }
 
     /**
@@ -173,7 +194,8 @@ trait HandlesRestSubscriptions{
      */
     public function getSubscriptionPayments(Subscription $subscription): array
     {
-        // TODO: Implement getSubscriptionPayments() method.
+        //todo
+        return [];
     }
 
     /**
@@ -197,7 +219,17 @@ trait HandlesRestSubscriptions{
      */
     public function getSubscriptionPlans(): array
     {
-        // TODO: Implement getSubscriptionPlans() method.
+        // This seems to be here only for the stripe gateway ???
+       $apiService = PayPalApiServiceFactory::CreateForGateway($this);
+       return array_map(
+           function(\PayPal\Api\Plan $plan){
+               return [
+                   'reference'=>$plan->getId(),
+                   'name'=>$plan->getName()
+               ];
+           },
+           $apiService->getPlans()->toArray()
+       );
     }
 
     /**
@@ -211,7 +243,7 @@ trait HandlesRestSubscriptions{
      */
     public function subscribe(User $user, Plan $plan, SubscriptionForm $parameters): SubscriptionResponseInterface
     {
-        if($parameters instanceof PaypalSubscriptionFormModel === false){
+        if($parameters instanceof PayPalSubscriptionFormModel === false){
             throw new SubscriptionException('Subscription form model is invalid');
         }
 
@@ -226,12 +258,13 @@ trait HandlesRestSubscriptions{
                 $paypalRequest->gatewayId = $this->id;
 
                 $subscriptionResponse = $apiService->createSubscriptionRequest($plan);
+
                 if(is_null($subscriptionResponse)){
                     throw new SubscriptionException('Could Not Create Subscription');
                 }
                 $paypalRequest->setResponse($subscriptionResponse);
 
-                Plugin::getInstance()->subscriptions->saveSubscriptionRequest($paypalRequest);
+                $this->getPayPalSubscriptionService()->saveSubscriptionRequest($paypalRequest);
                 if($paypalRequest->hasErrors()){
                     throw new SubscriptionException('Could not save paypal request due to errors');
                 }
@@ -256,7 +289,41 @@ trait HandlesRestSubscriptions{
      */
     public function switchSubscriptionPlan(Subscription $subscription, Plan $plan, SwitchPlansForm $parameters): SubscriptionResponseInterface
     {
-        // TODO: Implement switchSubscriptionPlan() method.
+        $subscriptionRequest = $this->getSubscriptionRequestFromSubscription($subscription);
+        $subscriptionRequest->planId = $plan->id;
+        $apiService = PayPalApiServiceFactory::CreateForGateway($subscriptionRequest->getPlan()->getGateway());
+        $apiService->updateSubscription($subscriptionRequest);
+        $this->getPayPalSubscriptionService()->saveSubscriptionRequest($subscriptionRequest);
+
+        return $subscriptionRequest;
+    }
+
+    /**
+     * Reactivates the subscription if it has been cancelled?? or suspended
+     * @param Subscription $subscription
+     * @return SubscriptionResponseInterface
+     */
+    public function reactivateSubscription(Subscription $subscription): SubscriptionResponseInterface
+    {
+        $subscriptionRequest = $this->getSubscriptionRequestFromSubscription($subscription);
+
+        $apiService = PayPalApiServiceFactory::CreateForGateway($subscriptionRequest->getPlan()->getGateway());
+        $hasReactivated = $apiService->activateSubscription($subscriptionRequest->paypalSubscriptionId, 'User Reactivated');
+        if($hasReactivated === false){
+            throw new SubscriptionException('Subscription Could not be cancelled. Paypal Returned an error');
+        }
+
+        try{
+            $subscriptionService = $this->getPayPalSubscriptionService();
+            $subscriptionRequest->setAsActive();
+            $subscriptionRequest = $subscriptionService->saveSubscriptionRequest($subscriptionRequest);
+        }catch (\Exception $e){
+            \Craft::info($e->getMessage(),Plugin::LogCategory);
+            \Craft::info($e->getTraceAsString(),Plugin::LogCategory);
+            throw new SubscriptionException('Could not update Subscription');
+        }
+
+        return $subscriptionRequest;
     }
 
     /**
@@ -276,6 +343,22 @@ trait HandlesRestSubscriptions{
      */
     public function supportsPlanSwitch(): bool
     {
-        // TODO: Implement supportsPlanSwitch() method.
+        return true;
+    }
+
+    /**
+     * @return PaypalSubscriptionService
+     */
+    protected function getPayPalSubscriptionService(){
+        return Plugin::getInstance()->subscriptions;
+    }
+
+    protected function getSubscriptionRequestFromSubscription(Subscription $subscription){
+        $subscriptionService = $this->getPayPalSubscriptionService();
+        $subscriptionRequest = $subscriptionService->getSubscriptionRequestBySubscriptionId($subscription->getId());
+        if(is_null($subscriptionRequest)){
+            throw new SubscriptionException('Subscription Request Not Found');
+        }
+        return $subscriptionRequest;
     }
 }

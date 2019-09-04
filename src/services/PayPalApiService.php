@@ -5,7 +5,7 @@ use craft\base\Component;
 use craft\commerce\paypal\contracts\PaypalBillingPlan;
 use craft\commerce\paypal\models\PayPalProduct;
 use craft\commerce\paypal\models\PayPalSubscription;
-use craft\commerce\paypal\models\PaypalSubscriptionRequestResponse;
+use craft\commerce\paypal\models\PayPalSubscriptionRequestResponse;
 use craft\commerce\paypal\models\PayPalWebhook;
 use craft\commerce\paypal\Plugin;
 use craft\helpers\UrlHelper;
@@ -20,7 +20,11 @@ use PayPal\Api\PaymentPreferences;
 use PayPal\Api\Plan;
 use PayPal\Api\PricingScheme;
 use PayPal\Api\Subscription;
+use PayPal\Api\SubscriptionActivateRequest;
+use PayPal\Api\SubscriptionCancelRequest;
 use PayPal\Api\SubscriptionPlan;
+use PayPal\Api\SubscriptionRequest;
+use PayPal\Api\SubscriptionSuspendRequest;
 use PayPal\Api\VerifyWebhookSignature;
 use PayPal\Api\Webhook;
 use PayPal\Api\WebhookEventType;
@@ -139,26 +143,93 @@ class PayPalApiService extends Component{
 
     /**
      * @param $subscriptionId
-     * @return PaypalSubscriptionRequestResponse
+     * @return PayPalSubscriptionRequestResponse
      */
     public function getSubscription($subscriptionId){
         $subscription = Subscription::get($subscriptionId, $this->context);
-        return new PaypalSubscriptionRequestResponse([
+        return new PayPalSubscriptionRequestResponse([
             'id'=>$subscription->getId(),
             'status'=>$subscription->getStatus(),
-            //'nextBillingTime'=>$subscription->getBillingInfo()->get
+            'nextBillingTime'=>\DateTime::createFromFormat(
+                DATE_ISO8601,
+                $subscription->getBillingInfo()->getNextBillingTime()
+            )
         ]);
     }
+
+    public function suspendSubscription(string $subscriptionId, string $reason){
+        $suspendRequest = new SubscriptionSuspendRequest();
+        $suspendRequest->setId($subscriptionId);
+        $suspendRequest->setReason($reason);
+        try{
+            $suspendRequest->create($this->context);
+            return true;
+        }catch (PayPalConnectionException $e){
+            \Craft::info($e->getData(),Plugin::LogCategory);
+            return false;
+        }
+    }
+
+    public function activateSubscription(string $subscriptionId, string $reason){
+        $activateRequest = new SubscriptionActivateRequest();
+        $activateRequest->setId($subscriptionId);
+        $activateRequest->setReason($reason);
+        try{
+            $activateRequest->create($this->context);
+            return true;
+        }catch (PayPalConnectionException $e){
+            \Craft::info($e->getData(),Plugin::LogCategory);
+            return false;
+        }
+    }
+
+    public function cancelSubscription(string $subscriptionId, string $reason){
+        $cancelRequest = new SubscriptionCancelRequest();
+        $cancelRequest->setId($subscriptionId);
+        $cancelRequest->setReason($reason);
+        try{
+            $cancelRequest->create($this->context);
+            return true;
+        }catch (PayPalConnectionException $e){
+            \Craft::info($e->getData(),Plugin::LogCategory);
+            return false;
+        }
+    }
+
+    public function updateSubscription(PayPalSubscription $payPalSubscription){
+        if($payPalSubscription->isDirty() && $payPalSubscription->validate()) {
+            $patchRequest = new PatchRequest();
+            if ($payPalSubscription->isDirty('planId')) {
+                $patch = new Patch();
+                $patch->setValue($payPalSubscription->planId)->setOp('replace')->setPath('/plan_id');
+                $patchRequest->addPatch($patch);
+            }
+            if(count($patchRequest->getPatches()) > 0){
+                try {
+                    $payPalApiSubscription = Subscription::get($payPalSubscription->paypalSubscriptionId, $this->context);
+                    $payPalApiSubscription->update($patchRequest, $this->context);
+
+                    return $payPalSubscription;
+                }catch (PayPalConnectionException $e){
+                    \Craft::info($e->getData(),Plugin::LogCategory);
+                    $payPalSubscription->addError('api',$e->getMessage());
+                }
+            }
+        }
+        return $payPalSubscription;
+    }
+
     /**
      * @param PaypalBillingPlan $paypalBillingPlan
-     * @return PaypalSubscriptionRequestResponse|null
+     * @return PayPalSubscriptionRequestResponse|null
      */
     public function createSubscriptionRequest(PaypalBillingPlan $paypalBillingPlan){
-        $subscription = new Subscription();
+
+        $subscription = new SubscriptionRequest();
         $subscription->setPlanId($paypalBillingPlan->getPlanId());
         $subscription->setAutoRenewal($paypalBillingPlan->getAutoRenewPlan());
 
-        $successUrl = UrlHelper::actionUrl('commerce-paypal/subscription/success');
+        $successUrl = UrlHelper::actionUrl('commerce-paypal/subscription/complete');
         $cancelUrl = UrlHelper::actionUrl('commerce-paypal/subscription/cancel');
 
         $applicationContext = new ApplicationContext();
@@ -166,12 +237,11 @@ class PayPalApiService extends Component{
         $applicationContext->setReturnUrl($successUrl);
 
         $subscription->setApplicationContext($applicationContext);
-
         try{
             $subscription->create($this->context);
             foreach($subscription->getLinks() as $link){
                 if($link->getRel() === 'approve') {
-                    return new PaypalSubscriptionRequestResponse([
+                    return new PayPalSubscriptionRequestResponse([
                         'redirectLink'=>$link->getHref(),
                         'id'=>$subscription->getId(),
                         'status'=>$subscription->getStatus()
